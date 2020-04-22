@@ -1,0 +1,4 @@
+$PREGO --query 'data.example2.return' --policy test/example2.rego --policy test/feedback.rego --feedback <<<'{"foo":"baz"}
+{}
+{"foo":"baz"}
+{"foo":"baz"}'

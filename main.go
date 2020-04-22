@@ -10,6 +10,8 @@ import (
 	"os"
 
 	"github.com/open-policy-agent/opa/rego"
+	"github.com/open-policy-agent/opa/storage"
+	"github.com/open-policy-agent/opa/storage/inmem"
 	"github.com/urfave/cli/v2"
 )
 
@@ -20,10 +22,33 @@ func main() {
 			policyPaths := c.StringSlice("policy")
 			dataPaths := c.StringSlice("data")
 			query := c.Path("query")
-			q, err := InitRego(policyPaths, dataPaths, query)
+			feedback := c.Bool("feedback")
+
+			r, err := InitRego(policyPaths, dataPaths, query, feedback)
 			if err != nil {
 				return err
 			}
+
+			var stateStore storage.Store
+			var qstate rego.PreparedEvalQuery
+			if feedback {
+				rstate, err := InitRego(policyPaths, dataPaths, "nextstate=data.prego.nextstate", feedback)
+				if err != nil {
+					return err
+				}
+				stateStore = inmem.NewFromObject(map[string]interface{}{"prego_state": nil})
+				rego.Store(stateStore)(r)
+				rego.Store(stateStore)(rstate)
+				qstate, err = rstate.PrepareForEval(context.TODO())
+				if err != nil {
+					return fmt.Errorf("error creating evalQuery: %v", err)
+				}
+			}
+			q, err := r.PrepareForEval(context.TODO())
+			if err != nil {
+				return fmt.Errorf("error creating evalQuery: %v", err)
+			}
+
 			scanner := bufio.NewScanner(os.Stdin)
 			for scanner.Scan() {
 				t := scanner.Text()
@@ -36,6 +61,19 @@ func main() {
 				if len(results) > 0 {
 					resBytes, _ := json.Marshal(results)
 					fmt.Println(string(resBytes))
+				}
+				if feedback {
+					resultsstate, err := qstate.Eval(context.TODO(), rego.EvalInput(input))
+					if err != nil {
+						return err
+					}
+					if len(resultsstate) > 0 {
+						nextstate, ok := resultsstate[0].Bindings["nextstate"]
+						if !ok {
+							return fmt.Errorf("can't find nextstate in bindings: %+v", resultsstate)
+						}
+						storage.WriteOne(context.TODO(), stateStore, storage.ReplaceOp, storage.MustParsePath("/prego_state"), nextstate)
+					}
 				}
 			}
 			return nil
@@ -55,6 +93,10 @@ func main() {
 				Value: "res = data",
 				Usage: "query to evaluate",
 			},
+			&cli.BoolFlag{
+				Name:  "feedback",
+				Usage: "feed the evaluation result back to the next evaluation. To use, load a policy under the `prego` package, which defines a rule called `nextstate`. This `nextstate` will be nade available to your poilicy under `data.prego_state`",
+			},
 		},
 	}
 
@@ -64,28 +106,23 @@ func main() {
 	}
 }
 
-func InitRego(policyPaths []string, dataPaths []string, query string) (rego.PreparedEvalQuery, error) {
+func InitRego(policyPaths []string, dataPaths []string, query string, feedback bool) (*rego.Rego, error) {
 	var regoBuilders []func(*rego.Rego)
 	regoBuilders = append(regoBuilders, rego.Query(query))
 	for _, path := range policyPaths {
 		policyBytes, err := ioutil.ReadFile(path)
 		if err != nil {
-			return rego.PreparedEvalQuery{}, fmt.Errorf("policy file not found: %s", path)
+			return nil, fmt.Errorf("policy file not found: %s", path)
 		}
 		regoBuilders = append(regoBuilders, rego.Module(path, string(policyBytes)))
 	}
 	for _, path := range dataPaths {
 		dataBytes, err := ioutil.ReadFile(path)
 		if err != nil {
-			return rego.PreparedEvalQuery{}, fmt.Errorf("data file not found: %s", path)
+			return nil, fmt.Errorf("data file not found: %s", path)
 		}
 		regoBuilders = append(regoBuilders, rego.Module(path, string(dataBytes)))
 	}
-
-	evalQuery, err := rego.New(regoBuilders...).PrepareForEval(context.TODO())
-	if err != nil {
-		return rego.PreparedEvalQuery{}, fmt.Errorf("error creating evalQuery: %v", err)
-	}
-	return evalQuery, nil
-
+	r := rego.New(regoBuilders...)
+	return r, nil
 }
