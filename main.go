@@ -22,17 +22,17 @@ func main() {
 			policyPaths := c.StringSlice("policy")
 			dataPaths := c.StringSlice("data")
 			query := c.Path("query")
-			feedback := c.Bool("feedback")
+			stateful := c.Bool("stateful")
 
-			r, err := InitRego(policyPaths, dataPaths, query, feedback)
+			r, err := InitRego(policyPaths, dataPaths, query, stateful)
 			if err != nil {
 				return err
 			}
 
 			var stateStore storage.Store
 			var qstate rego.PreparedEvalQuery
-			if feedback {
-				rstate, err := InitRego(policyPaths, dataPaths, "nextstate=data.prego.nextstate", feedback)
+			if stateful {
+				rstate, err := InitRego(policyPaths, dataPaths, "nextstate=data.prego.nextstate", stateful)
 				if err != nil {
 					return err
 				}
@@ -62,7 +62,7 @@ func main() {
 					resBytes, _ := json.Marshal(results)
 					fmt.Println(string(resBytes))
 				}
-				if feedback {
+				if stateful {
 					resultsstate, err := qstate.Eval(context.TODO(), rego.EvalInput(input))
 					if err != nil {
 						return err
@@ -94,8 +94,8 @@ func main() {
 				Usage: "query to evaluate",
 			},
 			&cli.BoolFlag{
-				Name:  "feedback",
-				Usage: "feed the evaluation result back to the next evaluation. To use, load a policy under the `prego` package, which defines a rule called `nextstate`. This `nextstate` will be nade available to your poilicy under `data.prego_state`",
+				Name:  "stateful",
+				Usage: "feed the evaluation result back to the next evaluation. To use, load a policy using the `prego` package, which defines a rule `nextstate`. This rule will be made available to your poilicy under `data.prego_state`",
 			},
 		},
 	}
@@ -106,7 +106,7 @@ func main() {
 	}
 }
 
-func InitRego(policyPaths []string, dataPaths []string, query string, feedback bool) (*rego.Rego, error) {
+func InitRego(policyPaths []string, dataPaths []string, query string, stateful bool) (*rego.Rego, error) {
 	var regoBuilders []func(*rego.Rego)
 	regoBuilders = append(regoBuilders, rego.Query(query))
 	for _, path := range policyPaths {
