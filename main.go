@@ -29,6 +29,8 @@ func main() {
 				return err
 			}
 
+			// TODO: think of a way to support statefull without an extra query (per event).
+			// for example, change the user's original query or find a way to look into data without query
 			var stateStore storage.Store
 			var qstate rego.PreparedEvalQuery
 			if stateful {
