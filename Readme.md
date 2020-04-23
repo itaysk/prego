@@ -33,6 +33,16 @@ You can specify the following additional flags:
 
 - Data files (json files) with the `--data` flag which takes a path to a file. Currently data flag is the same as the policy flag.
 - Stateful policies using the `--stateful` flag which is a boolean switch. See the Stateful Policies section below.
+- Customize the output format using the `--output` flag which. See the Output section below.
+
+## Output format
+
+The following output formatters are supported:
+
+
+- `json`: simple dump of the resulting object as JSON
+- `regogo=query`: parse the result using [regogo](https://github.com/itaysk/regogo). e.g `--output 'regogo=input.expressions[0].value'`. input is every result in the Resultset.
+-  `gotemplate=query`: parse the result using [go templates](https://golang.org/pkg/text/template/). e.g `--output 'gotemplate={{range .Expressions}}{{.Value}}{{end}}'`. input is every result in the Resultset. 
 
 ## Stateful Policies
 

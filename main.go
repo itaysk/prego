@@ -8,12 +8,16 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
+	"text/template"
 
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/storage"
 	"github.com/open-policy-agent/opa/storage/inmem"
 	"github.com/urfave/cli/v2"
 )
+
+var printer Printer
 
 func main() {
 	app := &cli.App{
@@ -23,6 +27,27 @@ func main() {
 			dataPaths := c.StringSlice("data")
 			query := c.Path("query")
 			stateful := c.Bool("stateful")
+			outputFormat := c.String("output")
+
+			outputFormatParts := strings.Split(outputFormat, "=")
+			switch outputFormatParts[0] {
+			case "json":
+				printer = jsonPrinter{}
+			case "regogo":
+				printer = regogoPrinter{
+					query: outputFormatParts[1],
+				}
+			case "gotemplate":
+				t, err := template.New("template").Parse(outputFormatParts[1])
+				if err != nil {
+					return fmt.Errorf("invalid go template: %s", outputFormatParts[1])
+				}
+				printer = gotemplatePrinter{
+					template: t,
+				}
+			default:
+				return fmt.Errorf("unsupported output format: %s", outputFormat)
+			}
 
 			r, err := InitRego(policyPaths, dataPaths, query, stateful)
 			if err != nil {
@@ -52,6 +77,7 @@ func main() {
 			}
 
 			scanner := bufio.NewScanner(os.Stdin)
+			printer.Preamble()
 			for scanner.Scan() {
 				t := scanner.Text()
 				var input map[string]interface{}
@@ -61,8 +87,7 @@ func main() {
 					return err
 				}
 				if len(results) > 0 {
-					resBytes, _ := json.Marshal(results)
-					fmt.Println(string(resBytes))
+					printer.Print(results)
 				}
 				if stateful {
 					resultsstate, err := qstate.Eval(context.TODO(), rego.EvalInput(input))
@@ -78,6 +103,7 @@ func main() {
 					}
 				}
 			}
+			printer.Epilogue()
 			return nil
 		},
 		Flags: []cli.Flag{
@@ -98,6 +124,11 @@ func main() {
 			&cli.BoolFlag{
 				Name:  "stateful",
 				Usage: "feed the evaluation result back to the next evaluation. To use, load a policy using the `prego` package, which defines a rule `nextstate`. This rule will be made available to your poilicy under `data.prego_state`",
+			},
+			&cli.StringFlag{
+				Name:  "output",
+				Value: "json",
+				Usage: "specify the output format: json/regogo/gotemplate",
 			},
 		},
 	}
