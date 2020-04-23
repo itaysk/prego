@@ -32,16 +32,15 @@ func (p jsonPrinter) Print(results rego.ResultSet) {
 func (p jsonPrinter) Epilogue() {}
 
 type regogoPrinter struct {
-	query string
+	rg *regogo.Regogo
 }
 
 func (p regogoPrinter) Preamble() {}
 
 func (p regogoPrinter) Print(results rego.ResultSet) {
 	for _, result := range results {
-		// TODO: modify regogo so it can parse once
 		resultBytes, _ := json.Marshal(result)
-		regogoResult, _ := regogo.Get(string(resultBytes), p.query)
+		regogoResult, _ := p.rg.Get(string(resultBytes))
 		fmt.Println(regogoResult.JSON())
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/itaysk/regogo"
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/storage"
 	"github.com/open-policy-agent/opa/storage/inmem"
@@ -34,8 +35,12 @@ func main() {
 			case "json":
 				printer = jsonPrinter{}
 			case "regogo":
+				rg, err := regogo.New(outputFormatParts[1])
+				if err != nil {
+					return fmt.Errorf("invalid regogo: %s", outputFormatParts[1])
+				}
 				printer = regogoPrinter{
-					query: outputFormatParts[1],
+					rg: rg,
 				}
 			case "gotemplate":
 				t, err := template.New("template").Parse(outputFormatParts[1])

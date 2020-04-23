@@ -3,16 +3,13 @@ module github.com/itaysk/prego
 go 1.13
 
 require (
-	github.com/golang/protobuf v1.3.5 // indirect
-	github.com/googleapis/gnostic v0.4.1 // indirect
-	github.com/itaysk/regogo v0.0.0-20200418072509-74b59e1875c2
-	github.com/open-policy-agent/opa v0.18.0
+	github.com/itaysk/regogo v0.0.0-20200423164851-e9433c1fe5a7
+	github.com/kr/pretty v0.2.0 // indirect
+	github.com/open-policy-agent/opa v0.19.1
+	github.com/pkg/errors v0.9.1 // indirect
+	github.com/rcrowley/go-metrics v0.0.0-20200313005456-10cdbea86bc0 // indirect
+	github.com/stretchr/testify v1.4.0 // indirect
 	github.com/urfave/cli/v2 v2.2.0
-	golang.org/x/crypto v0.0.0-20200406173513-056763e48d71 // indirect
-	golang.org/x/net v0.0.0-20200324143707-d3edc9973b7e // indirect
-	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d // indirect
-	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
-	k8s.io/api v0.18.1 // indirect
-	k8s.io/client-go v11.0.0+incompatible // indirect
-	k8s.io/utils v0.0.0-20200410165547-614e4363e9c4 // indirect
+	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
+	gopkg.in/yaml.v2 v2.2.8 // indirect
 )
