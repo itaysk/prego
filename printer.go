@@ -26,7 +26,7 @@ func (p jsonPrinter) Preamble() {}
 
 func (p jsonPrinter) Print(results rego.ResultSet) {
 	resBytes, _ := json.Marshal(results)
-	fmt.Println(resBytes)
+	fmt.Println(string(resBytes))
 }
 
 func (p jsonPrinter) Epilogue() {}
