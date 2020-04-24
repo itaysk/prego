@@ -59,3 +59,14 @@ cat test/testdata.jsonl | prego --query 'data.example2.return' --policy test/exa
 ```
 
 This will evaulate every line in `test/testdata.jsonl` using the policy `test/example2.rego`, and the state machine defined in `test/example2-sm.rego`. The policy example2 is defining a rule which refers to the current state.
+
+## How is this different from `opa eval`?
+
+The opa binary has an `eval` subcommand that can evaluate policies from the command line. The primary difference, and the reason that prego exists, is that prego is made to process a stream of inputs, where 'opa eval' is made to process a single event at a time.  
+You could wrapped 'opa eval' in some shell script that mimics the streaming behavior, but this would be bad for performance since for every event you pay for rebuilding the Rego context and for executing a new process. This might seem negligible but in a streaming scenario, where you pay this cost for every event, it sums up to noticable performance impact.
+
+There are some additional differences:
+
+- As an official, objective tool, 'opa eval' outputs the raw evaluation result. prego is trying to be more opinionated with outputting a meaningful result that can further piped to another tool.
+- Related to the previous point, prego supports customizable output formatters.
+- Prego supports stateful policies.
