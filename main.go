@@ -30,37 +30,21 @@ func main() {
 			stateful := c.Bool("stateful")
 			outputFormat := c.String("output")
 
-			outputFormatParts := strings.Split(outputFormat, "=")
-			switch outputFormatParts[0] {
-			case "json":
-				printer = jsonPrinter{}
-			case "regogo":
-				rg, err := regogo.New(outputFormatParts[1])
-				if err != nil {
-					return fmt.Errorf("invalid regogo: %s", outputFormatParts[1])
-				}
-				printer = regogoPrinter{
-					rg: rg,
-				}
-			case "gotemplate":
-				t, err := template.New("template").Parse(outputFormatParts[1])
-				if err != nil {
-					return fmt.Errorf("invalid go template: %s", outputFormatParts[1])
-				}
-				printer = gotemplatePrinter{
-					template: t,
-				}
-			default:
-				return fmt.Errorf("unsupported output format: %s", outputFormat)
+			printer, err := initPrinter(outputFormat)
+			if err != nil {
+				return err
 			}
-
 			r, err := InitRego(policyPaths, dataPaths, query, stateful)
 			if err != nil {
 				return err
 			}
+			q, err := r.PrepareForEval(context.TODO())
+			if err != nil {
+				return fmt.Errorf("error creating evalQuery: %v", err)
+			}
 
-			// TODO: think of a way to support statefull without an extra query (per event).
-			// for example, change the user's original query or find a way to look into data without query
+			// TODO: think of a way to support stateful without an extra query (per event).
+			// ideas: change the user's original query or find a way to look into data without query
 			var stateStore storage.Store
 			var qstate rego.PreparedEvalQuery
 			if stateful {
@@ -76,13 +60,10 @@ func main() {
 					return fmt.Errorf("error creating evalQuery: %v", err)
 				}
 			}
-			q, err := r.PrepareForEval(context.TODO())
-			if err != nil {
-				return fmt.Errorf("error creating evalQuery: %v", err)
-			}
 
 			scanner := bufio.NewScanner(os.Stdin)
 			printer.Preamble()
+
 			for scanner.Scan() {
 				t := scanner.Text()
 				var input map[string]interface{}
@@ -108,6 +89,7 @@ func main() {
 					}
 				}
 			}
+
 			printer.Epilogue()
 			return nil
 		},
@@ -141,6 +123,32 @@ func main() {
 	err := app.Run(os.Args)
 	if err != nil {
 		log.Fatal(err)
+	}
+}
+
+func initPrinter(outputFormat string) (Printer, error) {
+	outputFormatParts := strings.Split(outputFormat, "=")
+	switch outputFormatParts[0] {
+	case "json":
+		return &jsonPrinter{}, nil
+	case "regogo":
+		rg, err := regogo.New(outputFormatParts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid regogo: %s", outputFormatParts[1])
+		}
+		return &regogoPrinter{
+			rg: rg,
+		}, nil
+	case "gotemplate":
+		t, err := template.New("template").Parse(outputFormatParts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid go template: %s", outputFormatParts[1])
+		}
+		return &gotemplatePrinter{
+			template: t,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported output format: %s", outputFormat)
 	}
 }
 
