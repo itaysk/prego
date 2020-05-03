@@ -9,9 +9,11 @@ Currently you have to build from source. Clone the repo and run `make build`.
 
 Prego takes the following basic arguments:
 
-- Policy files (rego files) with the `--policy` flag which takes a path to a file
-- Query to evaluate with the `--query` flag which takes a string (if ommitted it returns the entire `data` virtual document)
-- Input to evaluate as a line from stdin
+- Policy files (rego files) with the `--policy` flag which takes a path to a file.
+- Query to evaluate with the `--query` flag which takes a string (if ommitted it returns the entire `data` virtual document).
+- Input to evaluate as a line from stdin.
+
+Prego evaluates the loaded policy and picks the value of the last expression in each result in the result set. If there are multiple values to return, the return value is an array. This convention allows for multi part queries, while maintaining a simple API.
 
 ## Basic Example
 

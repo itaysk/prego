@@ -73,7 +73,10 @@ func main() {
 					return err
 				}
 				if len(results) > 0 {
-					printer.Print(results)
+					for _, res := range results {
+						exp := res.Expressions
+						printer.Print(exp[len(exp)-1].Value)
+					}
 				}
 				if stateful {
 					resultsstate, err := qstate.Eval(context.TODO(), rego.EvalInput(input))

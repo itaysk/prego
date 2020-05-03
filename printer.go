@@ -7,7 +7,6 @@ import (
 	"text/template"
 
 	"github.com/itaysk/regogo"
-	"github.com/open-policy-agent/opa/rego"
 )
 
 // Printer is an interface for printing prego results
@@ -16,15 +15,15 @@ type Printer interface {
 	Preamble()
 	// Epilogue prints something after results printing ends (one time)
 	Epilogue()
-	// Print prints a single resultset
-	Print(results rego.ResultSet)
+	// Print prints a single result
+	Print(results interface{})
 }
 
 type jsonPrinter struct{}
 
 func (p jsonPrinter) Preamble() {}
 
-func (p jsonPrinter) Print(results rego.ResultSet) {
+func (p jsonPrinter) Print(results interface{}) {
 	resBytes, _ := json.Marshal(results)
 	fmt.Println(string(resBytes))
 }
@@ -37,12 +36,10 @@ type regogoPrinter struct {
 
 func (p regogoPrinter) Preamble() {}
 
-func (p regogoPrinter) Print(results rego.ResultSet) {
-	for _, result := range results {
-		resultBytes, _ := json.Marshal(result)
-		regogoResult, _ := p.rg.Get(string(resultBytes))
-		fmt.Println(regogoResult.JSON())
-	}
+func (p regogoPrinter) Print(result interface{}) {
+	resultBytes, _ := json.Marshal(result)
+	regogoResult, _ := p.rg.Get(string(resultBytes))
+	fmt.Println(regogoResult.JSON())
 }
 
 func (p regogoPrinter) Epilogue() {}
@@ -53,11 +50,9 @@ type gotemplatePrinter struct {
 
 func (p gotemplatePrinter) Preamble() {}
 
-func (p gotemplatePrinter) Print(results rego.ResultSet) {
-	for _, result := range results {
-		p.template.Execute(os.Stdout, result)
-		fmt.Println()
-	}
+func (p gotemplatePrinter) Print(result interface{}) {
+	p.template.Execute(os.Stdout, result)
+	fmt.Println()
 }
 
 func (p gotemplatePrinter) Epilogue() {}
