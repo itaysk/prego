@@ -29,6 +29,7 @@ func main() {
 			query := c.Path("query")
 			stateful := c.Bool("stateful")
 			outputFormat := c.String("output")
+			printQuery := c.String("print")
 
 			printer, err := initPrinter(outputFormat)
 			if err != nil {
@@ -40,7 +41,7 @@ func main() {
 			}
 			q, err := r.PrepareForEval(context.TODO())
 			if err != nil {
-				return fmt.Errorf("error creating evalQuery: %v", err)
+				return fmt.Errorf("error creating main Query: %v", err)
 			}
 
 			// TODO: think of a way to support stateful without an extra query (per event).
@@ -57,8 +58,21 @@ func main() {
 				rego.Store(stateStore)(rstate)
 				qstate, err = rstate.PrepareForEval(context.TODO())
 				if err != nil {
-					return fmt.Errorf("error creating evalQuery: %v", err)
+					return fmt.Errorf("error creating state query: %v", err)
 				}
+			}
+
+			var qprint rego.PreparedEvalQuery
+			rprint, err := InitRego(policyPaths, dataPaths, printQuery, stateful)
+			if err != nil {
+				return err
+			}
+			if stateful {
+				rego.Store(stateStore)(rprint)
+			}
+			qprint, err = rprint.PrepareForEval(context.TODO())
+			if err != nil {
+				return fmt.Errorf("error creating print query: %v", err)
 			}
 
 			scanner := bufio.NewScanner(os.Stdin)
@@ -72,7 +86,7 @@ func main() {
 				if err != nil {
 					return err
 				}
-				if len(results) > 0 {
+				if len(results) > 0 && shouldPrint(printQuery, qprint, input) {
 					for _, res := range results {
 						exp := res.Expressions
 						printer.Print(exp[len(exp)-1].Value)
@@ -120,13 +134,38 @@ func main() {
 				Value: "json",
 				Usage: "specify the output format: json/regogo/gotemplate",
 			},
+			&cli.StringFlag{
+				Name:  "print",
+				Value: "true",
+				Usage: "conditionally print the evaluation result based on result of the specified Rego query. if unspecified will always print",
+			},
 		},
 	}
-
 	err := app.Run(os.Args)
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func shouldPrint(printQuery string, qprint rego.PreparedEvalQuery, input map[string]interface{}) bool {
+	// optimization for the common case where print query was not specified, where we can skip the print evaluation.
+	if printQuery == "true" {
+		return true
+	}
+	evalres, err := qprint.Eval(context.TODO(), rego.EvalInput(input))
+	if err != nil {
+		return false
+	}
+	p := false
+	for _, res := range evalres {
+		exp := res.Expressions
+		b, ok := exp[len(exp)-1].Value.(bool)
+		if !ok {
+			b = false
+		}
+		p = p || b
+	}
+	return p
 }
 
 func initPrinter(outputFormat string) (Printer, error) {

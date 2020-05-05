@@ -29,6 +29,11 @@ cat test/testdata.jsonl | prego --policy test/example.rego --query 'data.example
 
 This will do the same as previously but each printed line will contain just the value of `myrule`.
 
+```bash
+cat test/testdata.jsonl | prego --policy test/example.rego --query 'data.example.hello' --print 'data.example.myrule'
+```
+
+This will print the value of `data.example.hello` from the loaded policy `test/example.rego` but only when the rule `data.example.myrule` evaluates to true
 
 ## Additional flags
 You can specify the following additional flags:
