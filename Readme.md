@@ -1,79 +1,47 @@
-Prego - pipe into rego
+Prego - Pipe into Rego
 
-Prego is a stream processing tool that uses Rego, the Open Policy Agent engine. It is meant to be used as the receiving end of a pipe, for example `cat myfile | prego`, similar to how you would use `sed`, `awk`, or `jq`.
+Prego is a stream processing cli tool that takes JSON from stdin, and processes it using [Rego](https://www.openpolicyagent.org/docs/latest/policy-language/) (the [Open Policy Agent](https://www.openpolicyagent.org/) language). It is inspired by [AWK](https://en.wikipedia.org/wiki/AWK) and can be thought of an AWK/Rego hybrid.
 
 ## Getting Prego
 Currently you have to build from source. Clone the repo and run `make build`.
 
-## Basic Usage
+## Getting Started
 
-Prego takes the following basic arguments:
+Let's try Prego with the included example in [test/example.rego](test/example.rego). This is an example that:
+1. Prints the time when it started and finished.
+2. Looks in the input json for `.foo` elements which have a value of `bar`.
+  1. Those items will be printed out.
+3. Looks in the input json for `.hello` elements.
+  1. For those items it will print the value of `.hello` in uppercase letters.
+4. Every other items that doesn't match those conditions will be ignored (not printed).
 
-- Policy files (rego files) with the `--policy` flag which takes a path to a file.
-- Query to evaluate with the `--query` flag which takes a string (if ommitted it returns the entire `data` virtual document).
-- Input to evaluate as a line from stdin.
+Run `prego -f test/example.rego`, and type input documents (as JSON), or use the example data: `prego -f test/example.rego <test/testdata.jsonl`.
 
-Prego evaluates the loaded policy and picks the value of the last expression in each result in the result set. If there are multiple values to return, the return value is an array. This convention allows for multi part queries, while maintaining a simple API.
+If we examine the Rego file, we see how it works:
 
-## Basic Example
+```rego
+package prego
 
-```bash
-cat test/testdata.jsonl | prego --policy test/example.rego
+BEGIN[out] {
+  clock := time.clock(time.now_ns())
+  out := sprintf("Started at %d:%d:%d", [clock[0], clock[1], clock[2]])
+}
+
+MAIN[out] {
+  input.foo == "bar"
+  out := input
+}
+
+MAIN[out] {
+  out := upper(input.hello)
+}
+
+END[out] {
+  clock := time.clock(time.now_ns())
+  out := sprintf("Finished at %d:%d:%d", [clock[0], clock[1], clock[2]])
+}
 ```
 
-This will evaluate every line in `test/testdata.jsonl` using the policy `test/example.rego`, and print the evaluation result for each line into stdout.
-
-```bash
-cat test/testdata.jsonl | prego --policy test/example.rego --query 'data.example.myrule'
-```
-
-This will do the same as previously but each printed line will contain just the value of `myrule`.
-
-```bash
-cat test/testdata.jsonl | prego --policy test/example.rego --query 'data.example.hello' --print 'data.example.myrule'
-```
-
-This will print the value of `data.example.hello` from the loaded policy `test/example.rego` but only when the rule `data.example.myrule` evaluates to true
-
-## Additional flags
-You can specify the following additional flags:
-
-- Data files (json files) with the `--data` flag which takes a path to a file. Currently data flag is the same as the policy flag.
-- Stateful policies using the `--stateful` flag which is a boolean switch. See the Stateful Policies section below.
-- Customize the output format using the `--output` flag which. See the Output section below.
-
-## Output format
-
-The following output formatters are supported:
-
-
-- `json`: simple dump of the resulting object as JSON
-- `regogo=query`: parse the result using [regogo](https://github.com/itaysk/regogo). e.g `--output 'regogo=input.expressions[0].value'`. input is every result in the Resultset.
--  `gotemplate=query`: parse the result using [go templates](https://golang.org/pkg/text/template/). e.g `--output 'gotemplate={{range .Expressions}}{{.Value}}{{end}}'`. input is every result in the Resultset. 
-
-## Stateful Policies
-
-You can build stateful policies using the `--stateful` flag. You use this flag in conjunction with a conventional policy file that have the followoing characteristics:
-1. The package is `prego`
-2. It defines a rule called `nextstate`
-The result of `nextstate` is considered the "return value" of the stateful policy and is made available to the next evaluation under the variable `data.prego_state`.
-
-
-### Stateful Example
-
-```bash
-cat test/testdata.jsonl | prego --query 'data.example2.return' --policy test/example2.rego --policy test/example2-sm.rego --stateful
-```
-
-This will evaulate every line in `test/testdata.jsonl` using the policy `test/example2.rego`, and the state machine defined in `test/example2-sm.rego`. The policy example2 is defining a rule which refers to the current state.
-
-## How is this different from `opa eval`?
-
-The opa binary has an `eval` subcommand that can evaluate policies from the command line. The primary difference, and the reason that prego exists, is that prego is made to process a stream of inputs, where 'opa eval' is made to process a single event at a time.  
-You could wrapped 'opa eval' in some shell script that mimics the streaming behavior, but this would be bad for performance since for every event you pay for rebuilding the Rego context and for executing a new process. This might seem negligible but in a streaming scenario, where you pay this cost for every event, it sums up to noticable performance impact.
-
-There are some additional differences:
-
-- As an official, objective tool, 'opa eval' outputs the raw evaluation result. prego is trying to be more opinionated with outputting a meaningful result that can further piped to another tool.
-- Related to the previous point, prego supports customizable output formatters.
-- Prego supports stateful policies.
+You "program" Prego by creating a Rego file with the "prego" package name, which includes the conventional rules: "BEGIN", "MAIN", and "END".
+BEGIN is used to generate text before starting to process the input. END is used to generate text after the finishing to process the input. MAIN is used to process each item in the input.  
+The rules are regular Rego rules, which evaluates to (i.e "returns") a set of strings. Because they are Rego rules they can leverage explicit and implicit assertions to conditionally execute the relevant rules. In the example, we have 2 implementations of the MAIN rule, but each one of them is handling a different case, and results in a different outcome.

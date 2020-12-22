@@ -5,139 +5,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
-	"strings"
-	"text/template"
+	"os/signal"
+	"syscall"
 
-	"github.com/itaysk/regogo"
 	"github.com/open-policy-agent/opa/rego"
-	"github.com/open-policy-agent/opa/storage"
-	"github.com/open-policy-agent/opa/storage/inmem"
 	"github.com/urfave/cli/v2"
 )
 
-var printer Printer
-
 func main() {
 	app := &cli.App{
-		Usage: "pipe into rego. take json lines from stdin and evaluate them with a loaded rego policy",
-		Action: func(c *cli.Context) error {
-			policyPaths := c.StringSlice("policy")
-			dataPaths := c.StringSlice("data")
-			query := c.Path("query")
-			stateful := c.Bool("stateful")
-			outputFormat := c.String("output")
-			printQuery := c.String("print")
-
-			printer, err := initPrinter(outputFormat)
-			if err != nil {
-				return err
-			}
-			r, err := InitRego(policyPaths, dataPaths, query, stateful)
-			if err != nil {
-				return err
-			}
-			q, err := r.PrepareForEval(context.TODO())
-			if err != nil {
-				return fmt.Errorf("error creating main Query: %v", err)
-			}
-
-			// TODO: think of a way to support stateful without an extra query (per event).
-			// ideas: change the user's original query or find a way to look into data without query
-			var stateStore storage.Store
-			var qstate rego.PreparedEvalQuery
-			if stateful {
-				rstate, err := InitRego(policyPaths, dataPaths, "nextstate=data.prego.nextstate", stateful)
-				if err != nil {
-					return err
-				}
-				stateStore = inmem.NewFromObject(map[string]interface{}{"prego_state": nil})
-				rego.Store(stateStore)(r)
-				rego.Store(stateStore)(rstate)
-				qstate, err = rstate.PrepareForEval(context.TODO())
-				if err != nil {
-					return fmt.Errorf("error creating state query: %v", err)
-				}
-			}
-
-			var qprint rego.PreparedEvalQuery
-			rprint, err := InitRego(policyPaths, dataPaths, printQuery, stateful)
-			if err != nil {
-				return err
-			}
-			if stateful {
-				rego.Store(stateStore)(rprint)
-			}
-			qprint, err = rprint.PrepareForEval(context.TODO())
-			if err != nil {
-				return fmt.Errorf("error creating print query: %v", err)
-			}
-
-			scanner := bufio.NewScanner(os.Stdin)
-			printer.Preamble()
-
-			for scanner.Scan() {
-				t := scanner.Text()
-				var input map[string]interface{}
-				json.Unmarshal([]byte(t), &input)
-				results, err := q.Eval(context.TODO(), rego.EvalInput(input))
-				if err != nil {
-					return err
-				}
-				if len(results) > 0 && shouldPrint(printQuery, qprint, input) {
-					for _, res := range results {
-						exp := res.Expressions
-						printer.Print(exp[len(exp)-1].Value)
-					}
-				}
-				if stateful {
-					resultsstate, err := qstate.Eval(context.TODO(), rego.EvalInput(input))
-					if err != nil {
-						return err
-					}
-					if len(resultsstate) > 0 {
-						nextstate, ok := resultsstate[0].Bindings["nextstate"]
-						if !ok {
-							return fmt.Errorf("can't find nextstate in bindings: %+v", resultsstate)
-						}
-						storage.WriteOne(context.TODO(), stateStore, storage.ReplaceOp, storage.MustParsePath("/prego_state"), nextstate)
-					}
-				}
-			}
-
-			printer.Epilogue()
-			return nil
-		},
+		Usage:  "Stream procesing using Rego",
+		Action: appMain,
 		Flags: []cli.Flag{
 			&cli.StringSliceFlag{
-				Name:     "policy",
+				Name:     "files",
+				Aliases:  []string{"f"},
 				Required: true,
-				Usage:    "file path to rego policy. can be specified multiple times",
-			},
-			&cli.StringSliceFlag{
-				Name:  "data",
-				Usage: "file path to additional data. can be specified multiple times",
+				Usage:    "Paths to load data and Rego modules from. Any file with a *.rego, *.yaml, or *.json extension will be loaded. The path can be a directory or a file, directories are loaded recursively.",
 			},
 			&cli.StringFlag{
-				Name:  "query",
-				Value: "res = data",
-				Usage: "query to evaluate",
-			},
-			&cli.BoolFlag{
-				Name:  "stateful",
-				Usage: "feed the evaluation result back to the next evaluation. To use, load a policy using the `prego` package, which defines a rule `nextstate`. This rule will be made available to your poilicy under `data.prego_state`",
-			},
-			&cli.StringFlag{
-				Name:  "output",
-				Value: "json",
-				Usage: "specify the output format: json/regogo/gotemplate",
-			},
-			&cli.StringFlag{
-				Name:  "print",
-				Value: "true",
-				Usage: "conditionally print the evaluation result based on result of the specified Rego query. if unspecified will always print",
+				Name:     "package",
+				Value:    "main",
+				Required: false,
+				Usage:    "Name of the Rego package to use (should match one the package in the provided file)",
 			},
 		},
 	}
@@ -147,70 +39,116 @@ func main() {
 	}
 }
 
-func shouldPrint(printQuery string, qprint rego.PreparedEvalQuery, input map[string]interface{}) bool {
-	// optimization for the common case where print query was not specified, where we can skip the print evaluation.
-	if printQuery == "true" {
-		return true
-	}
-	evalres, err := qprint.Eval(context.TODO(), rego.EvalInput(input))
+func appMain(c *cli.Context) error {
+	done := make(chan struct{})
+	handleInterrupt(done)
+
+	files := c.StringSlice("files")
+
+	pkg := c.String("package")
+	r := rego.New(
+		rego.Load(files, nil),
+		rego.Query(fmt.Sprintf("begin := data.%[1]s.BEGIN; end := data.%[1]s.END; main := data.%[1]s.MAIN", pkg)),
+	)
+	q, err := r.PrepareForEval(context.TODO())
 	if err != nil {
-		return false
+		return err
 	}
-	p := false
-	for _, res := range evalres {
-		exp := res.Expressions
-		b, ok := exp[len(exp)-1].Value.(bool)
-		if !ok {
-			b = false
-		}
-		p = p || b
+
+	begin, end, err := getFrame(q, pkg)
+	if err != nil {
+		return err
 	}
-	return p
+
+	for _, l := range begin {
+		fmt.Println(l)
+	}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	inputs := generate(*scanner, done)
+	outputs := process(inputs, q, pkg)
+	print(outputs)
+
+	//block main
+	<-done
+
+	for _, l := range end {
+		fmt.Println(l)
+	}
+
+	return nil
 }
 
-func initPrinter(outputFormat string) (Printer, error) {
-	outputFormatParts := strings.Split(outputFormat, "=")
-	switch outputFormatParts[0] {
-	case "json":
-		return &jsonPrinter{}, nil
-	case "regogo":
-		rg, err := regogo.New(outputFormatParts[1])
-		if err != nil {
-			return nil, fmt.Errorf("invalid regogo: %s", outputFormatParts[1])
-		}
-		return &regogoPrinter{
-			rg: rg,
-		}, nil
-	case "gotemplate":
-		t, err := template.New("template").Parse(outputFormatParts[1])
-		if err != nil {
-			return nil, fmt.Errorf("invalid go template: %s", outputFormatParts[1])
-		}
-		return &gotemplatePrinter{
-			template: t,
-		}, nil
-	default:
-		return nil, fmt.Errorf("unsupported output format: %s", outputFormat)
-	}
+func handleInterrupt(done chan struct{}) {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		fmt.Println()
+		close(done)
+	}()
 }
 
-func InitRego(policyPaths []string, dataPaths []string, query string, stateful bool) (*rego.Rego, error) {
-	var regoBuilders []func(*rego.Rego)
-	regoBuilders = append(regoBuilders, rego.Query(query))
-	for _, path := range policyPaths {
-		policyBytes, err := ioutil.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("policy file not found: %s", path)
-		}
-		regoBuilders = append(regoBuilders, rego.Module(path, string(policyBytes)))
+func getFrame(q rego.PreparedEvalQuery, pkg string) ([]interface{}, []interface{}, error) {
+	results, err := q.Eval(context.TODO())
+	if err != nil {
+		return nil, nil, err
 	}
-	for _, path := range dataPaths {
-		dataBytes, err := ioutil.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("data file not found: %s", path)
+	var begin, end []interface{}
+	if len(results) > 0 {
+		bs := results[0].Bindings
+		if b, ok := bs["begin"]; ok {
+			begin = b.([]interface{})
 		}
-		regoBuilders = append(regoBuilders, rego.Module(path, string(dataBytes)))
+		if e, ok := bs["end"]; ok {
+			end = e.([]interface{})
+		}
 	}
-	r := rego.New(regoBuilders...)
-	return r, nil
+	return begin, end, nil
+}
+
+func generate(in bufio.Scanner, done chan struct{}) <-chan map[string]interface{} {
+	out := make(chan map[string]interface{})
+	go func() {
+		defer close(done)
+		defer close(out)
+		for in.Scan() {
+			t := in.Text()
+			var input map[string]interface{}
+			json.Unmarshal([]byte(t), &input)
+			out <- input
+		}
+	}()
+	return out
+}
+
+func process(in <-chan map[string]interface{}, q rego.PreparedEvalQuery, pkg string) <-chan interface{} {
+	out := make(chan interface{})
+	go func() {
+		defer close(out)
+		for input := range in {
+			results, err := q.Eval(context.TODO(), rego.EvalInput(input))
+			if err != nil {
+				continue
+			}
+			if len(results) > 0 {
+				bs := results[0].Bindings
+				if m, ok := bs["main"]; ok {
+					for _, mi := range m.([]interface{}) {
+						out <- mi
+					}
+				}
+			}
+		}
+	}()
+	return out
+}
+
+func print(in <-chan interface{}) {
+	go func() {
+		for i := range in {
+			b, _ := json.Marshal(i)
+			fmt.Println(string(b))
+		}
+	}()
 }
